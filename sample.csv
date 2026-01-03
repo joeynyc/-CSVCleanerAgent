@@ -1,0 +1,7 @@
+Name,E-mail,Phone,Registration Date,Product SKU,Quantity
+John Doe,john@example.com,555-1234,2024-01-15,PROD-001,5
+Jane Smith,jane@test.com,,01/16/2024,PROD-002,3
+,bob@example.com,555-5678,2024-01-17,PROD-001,2
+Alice Johnson,alice@test.com,+1-555-9999,2024/01/18,PROD-003,10
+Bob Wilson,bob.wilson@example.com,5551234567,15-01-2024,PROD-002,1
+Charlie Brown,charlie@example.com,555.4321,2024-01-19,prod-001,7

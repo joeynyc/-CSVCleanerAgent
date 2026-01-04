@@ -10,6 +10,8 @@ const CONFIG = {
   MAX_PROMPT_LENGTH: 10000,
   SAMPLE_ROW_COUNT: 5,
   SAMPLE_VALUE_COUNT: 3,
+  RATE_LIMIT_MAX_CALLS: 100, // Max tool calls per minute
+  RATE_LIMIT_WINDOW_MS: 60000, // 1 minute window
 } as const;
 
 // Type definitions
@@ -25,6 +27,65 @@ interface CsvData {
 
 // Email validation (RFC 5322 simplified)
 const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
+// Structured logging interface
+interface AuditLog {
+  timestamp: string;
+  level: 'info' | 'warn' | 'error';
+  action: string;
+  filePath?: string;
+  success: boolean;
+  error?: string;
+  details?: Record<string, unknown>;
+}
+
+// Structured logging helper
+function logAudit(log: Omit<AuditLog, 'timestamp'>): void {
+  const auditEntry: AuditLog = {
+    ...log,
+    timestamp: new Date().toISOString(),
+  };
+
+  // Log to stderr as JSON for monitoring/parsing
+  console.error(JSON.stringify(auditEntry));
+}
+
+// Rate limiting class to prevent abuse
+class RateLimiter {
+  private calls: number = 0;
+  private resetTime: number = Date.now() + CONFIG.RATE_LIMIT_WINDOW_MS;
+
+  async checkLimit(limit: number = CONFIG.RATE_LIMIT_MAX_CALLS): Promise<void> {
+    const now = Date.now();
+
+    // Reset counter if window has passed
+    if (now > this.resetTime) {
+      this.calls = 0;
+      this.resetTime = now + CONFIG.RATE_LIMIT_WINDOW_MS;
+    }
+
+    this.calls++;
+
+    if (this.calls > limit) {
+      const resetIn = Math.ceil((this.resetTime - now) / 1000);
+      throw new Error(
+        `Rate limit exceeded. Maximum ${limit} tool calls per minute. Reset in ${resetIn} seconds.`
+      );
+    }
+  }
+
+  getStatus(): { calls: number; limit: number; resetsIn: number } {
+    const now = Date.now();
+    return {
+      calls: this.calls,
+      limit: CONFIG.RATE_LIMIT_MAX_CALLS,
+      resetsIn: Math.ceil((this.resetTime - now) / 1000),
+    };
+  }
+}
+
+// Global rate limiter instance
+const rateLimiter = new RateLimiter();
 
 // Security: Validate file path to prevent path traversal
 function validateFilePath(filePath: string): string {
@@ -84,14 +145,41 @@ function isValidDate(str: string): boolean {
   return date instanceof Date && !isNaN(date.getTime());
 }
 
+// Encoding: Read file with intelligent encoding detection
+function readFileWithEncoding(filePath: string): string {
+  try {
+    // Try UTF-8 first (most common encoding)
+    const content = readFileSync(filePath, "utf-8");
+
+    // Check for UTF-8 decoding errors (replacement characters)
+    if (content.includes('\uFFFD')) {
+      // UTF-8 decoding failed, try Latin1
+      return readFileSync(filePath, "latin1");
+    }
+
+    return content;
+  } catch (error) {
+    // If UTF-8 fails entirely, fallback to Latin1 (compatible with Windows-1252, ISO-8859-1)
+    try {
+      return readFileSync(filePath, "latin1");
+    } catch (fallbackError) {
+      throw new Error(
+        `Unable to read file with supported encodings (UTF-8, Latin1): ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+}
+
 // Shared CSV parsing logic with security measures
 function parseCsvFile(filePath: string): CsvData {
   // Security validations
   const validatedPath = validateFilePath(filePath);
   validateFileSize(validatedPath);
 
-  // Read file content
-  const content = readFileSync(validatedPath, "utf-8");
+  // Read file content with intelligent encoding detection
+  const content = readFileWithEncoding(validatedPath);
 
   // Parse CSV using proper library (handles quotes, escapes, multiline)
   const records = parse(content, {
@@ -126,12 +214,19 @@ function parseCsvFile(filePath: string): CsvData {
 }
 
 // Consistent error response helper
-function createErrorResponse(error: unknown): ToolResponse {
+function createErrorResponse(error: unknown, action: string, filePath?: string): ToolResponse {
   const message = error instanceof Error
     ? error.message
     : "An unknown error occurred";
 
-  console.error("Tool error:", error);
+  // Structured logging for errors
+  logAudit({
+    level: 'error',
+    action,
+    filePath,
+    success: false,
+    error: message,
+  });
 
   return {
     content: [{
@@ -172,6 +267,9 @@ Security: Only CSV files in the current working directory are allowed.`,
   },
   async (args): Promise<ToolResponse> => {
     try {
+      // Rate limiting check
+      await rateLimiter.checkLimit();
+
       const { headers, rows } = parseCsvFile(args.filePath);
 
       const result = {
@@ -179,6 +277,15 @@ Security: Only CSV files in the current working directory are allowed.`,
         rowCount: rows.length,
         sample: rows.slice(0, CONFIG.SAMPLE_ROW_COUNT),
       };
+
+      // Audit log for successful parse
+      logAudit({
+        level: 'info',
+        action: 'parse_csv',
+        filePath: args.filePath,
+        success: true,
+        details: { rowCount: rows.length, headerCount: headers.length },
+      });
 
       return {
         content: [
@@ -189,7 +296,7 @@ Security: Only CSV files in the current working directory are allowed.`,
         ],
       };
     } catch (error) {
-      return createErrorResponse(error);
+      return createErrorResponse(error, 'parse_csv', args.filePath);
     }
   }
 );
@@ -218,6 +325,9 @@ Security: Only CSV files in the current working directory are allowed.`,
   },
   async (args): Promise<ToolResponse> => {
     try {
+      // Rate limiting check
+      await rateLimiter.checkLimit();
+
       const { headers, rows } = parseCsvFile(args.filePath);
 
       const profile = headers.map((header) => {
@@ -247,6 +357,15 @@ Security: Only CSV files in the current working directory are allowed.`,
         };
       });
 
+      // Audit log for successful profiling
+      logAudit({
+        level: 'info',
+        action: 'profile_data',
+        filePath: args.filePath,
+        success: true,
+        details: { columnCount: headers.length, rowCount: rows.length },
+      });
+
       return {
         content: [
           {
@@ -256,7 +375,7 @@ Security: Only CSV files in the current working directory are allowed.`,
         ],
       };
     } catch (error) {
-      return createErrorResponse(error);
+      return createErrorResponse(error, 'profile_data', args.filePath);
     }
   }
 );

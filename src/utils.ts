@@ -18,7 +18,13 @@ export interface CsvData {
   rows: Record<string, string>[];
 }
 
-// Email validation (RFC 5322 simplified)
+// Email validation regex based on RFC 5322 (simplified for practical use)
+// Pattern breakdown:
+//   ^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+  - Local part: alphanumeric + allowed special chars
+//   @                                    - Required @ separator
+//   [a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}...) - Domain: starts with alphanumeric, allows hyphens
+//   (?:\.[a-zA-Z0-9]...)*$              - Subdomains: dot-separated, same rules
+// Note: This is intentionally simpler than full RFC 5322 to avoid ReDoS vulnerabilities
 export const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
 
 // Rate limiting class to prevent abuse
@@ -112,7 +118,8 @@ export function validateFilePath(filePath: string): string {
 // Security: Validate file size to prevent DoS
 export function validateFileSize(filePath: string): void {
   if (!existsSync(filePath)) {
-    throw new Error(`File not found: ${filePath}`);
+    // Don't leak the validated/resolved path in error messages
+    throw new Error("File not found");
   }
 
   const stats = statSync(filePath);

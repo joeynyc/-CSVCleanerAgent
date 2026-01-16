@@ -7,6 +7,7 @@ import {
   EMAIL_REGEX,
   RateLimiter,
 } from "./src/utils";
+import packageJson from "./package.json";
 
 // Type definitions
 interface ToolResponse {
@@ -177,7 +178,9 @@ Security: Only CSV files in the current working directory are allowed.`,
           type,
           totalRows: values.length,
           nullCount,
-          nullPercentage: ((nullCount / values.length) * 100).toFixed(1) + "%",
+          nullPercentage: values.length > 0
+            ? ((nullCount / values.length) * 100).toFixed(1) + "%"
+            : "0.0%",
           uniqueValues: unique,
           sampleValues: nonEmpty.slice(0, CONFIG.SAMPLE_VALUE_COUNT),
         };
@@ -209,7 +212,7 @@ Security: Only CSV files in the current working directory are allowed.`,
 // Create MCP server with CSV tools
 const csvCleanerServer = createSdkMcpServer({
   name: "csv-cleaner",
-  version: "0.1.0",
+  version: packageJson.version,
   tools: [parseCsv, profileData],
 });
 

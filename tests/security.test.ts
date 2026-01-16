@@ -1,6 +1,7 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, afterAll } from "bun:test";
 import { validateFilePath, sanitizeCsvValue } from "../src/utils";
 import { resolve } from "node:path";
+import { symlinkSync, unlinkSync, existsSync } from "node:fs";
 
 describe("Security Tests", () => {
   describe("validateFilePath", () => {
@@ -45,6 +46,75 @@ describe("Security Tests", () => {
       expect(() => {
         validateFilePath(validPath);
       }).not.toThrow();
+    });
+
+    it("should reject paths that share prefix but are outside working dir", () => {
+      // This tests the fix for path bypass via /app-malicious when cwd is /app
+      // We simulate by using an absolute path that starts with cwd string but isn't a child
+      const cwd = process.cwd();
+      const maliciousPath = cwd + "-malicious/evil.csv";
+      expect(() => {
+        validateFilePath(maliciousPath);
+      }).toThrow("Access denied");
+    });
+
+    it("should use path separator for boundary check", () => {
+      // Verify the separator-based check works correctly
+      // A valid subdirectory path should work
+      const validSubdir = "./tests/fixtures/valid.csv";
+      expect(() => validateFilePath(validSubdir)).not.toThrow();
+    });
+  });
+
+  describe("validateFilePath - symlink protection", () => {
+    const symlinkPath = "./tests/fixtures/symlink-test.csv";
+    const validTarget = "./tests/fixtures/valid.csv";
+
+    afterAll(() => {
+      // Cleanup any test symlinks
+      if (existsSync(symlinkPath)) {
+        try {
+          unlinkSync(symlinkPath);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+    });
+
+    it("should allow symlinks to files within working directory", () => {
+      // Create symlink to valid file within working dir
+      if (existsSync(symlinkPath)) {
+        unlinkSync(symlinkPath);
+      }
+      symlinkSync(resolve(validTarget), symlinkPath);
+
+      try {
+        const result = validateFilePath(symlinkPath);
+        expect(result).toBe(resolve(validTarget));
+      } finally {
+        unlinkSync(symlinkPath);
+      }
+    });
+
+    it("should reject symlinks pointing outside working directory", () => {
+      // Create symlink pointing to system file
+      if (existsSync(symlinkPath)) {
+        unlinkSync(symlinkPath);
+      }
+
+      // Create a symlink to /etc/passwd (renamed to .csv to pass extension check)
+      // This tests that even if the symlink has .csv extension, we check the real path
+      try {
+        symlinkSync("/etc/passwd", symlinkPath);
+
+        expect(() => {
+          validateFilePath(symlinkPath);
+        }).toThrow("Access denied");
+      } finally {
+        if (existsSync(symlinkPath)) {
+          unlinkSync(symlinkPath);
+        }
+      }
     });
   });
 

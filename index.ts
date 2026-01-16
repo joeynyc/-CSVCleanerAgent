@@ -5,6 +5,7 @@ import {
   isValidDate,
   parseCsvFile,
   EMAIL_REGEX,
+  RateLimiter,
 } from "./src/utils";
 
 // Type definitions
@@ -33,40 +34,6 @@ function logAudit(log: Omit<AuditLog, 'timestamp'>): void {
 
   // Log to stderr as JSON for monitoring/parsing
   console.error(JSON.stringify(auditEntry));
-}
-
-// Rate limiting class to prevent abuse
-class RateLimiter {
-  private calls: number = 0;
-  private resetTime: number = Date.now() + CONFIG.RATE_LIMIT_WINDOW_MS;
-
-  async checkLimit(limit: number = CONFIG.RATE_LIMIT_MAX_CALLS): Promise<void> {
-    const now = Date.now();
-
-    // Reset counter if window has passed
-    if (now > this.resetTime) {
-      this.calls = 0;
-      this.resetTime = now + CONFIG.RATE_LIMIT_WINDOW_MS;
-    }
-
-    this.calls++;
-
-    if (this.calls > limit) {
-      const resetIn = Math.ceil((this.resetTime - now) / 1000);
-      throw new Error(
-        `Rate limit exceeded. Maximum ${limit} tool calls per minute. Reset in ${resetIn} seconds.`
-      );
-    }
-  }
-
-  getStatus(): { calls: number; limit: number; resetsIn: number } {
-    const now = Date.now();
-    return {
-      calls: this.calls,
-      limit: CONFIG.RATE_LIMIT_MAX_CALLS,
-      resetsIn: Math.ceil((this.resetTime - now) / 1000),
-    };
-  }
 }
 
 // Global rate limiter instance
@@ -127,7 +94,7 @@ Security: Only CSV files in the current working directory are allowed.`,
   async (args): Promise<ToolResponse> => {
     try {
       // Rate limiting check
-      await rateLimiter.checkLimit();
+      rateLimiter.checkLimit();
 
       const { headers, rows } = parseCsvFile(args.filePath);
 
@@ -185,7 +152,7 @@ Security: Only CSV files in the current working directory are allowed.`,
   async (args): Promise<ToolResponse> => {
     try {
       // Rate limiting check
-      await rateLimiter.checkLimit();
+      rateLimiter.checkLimit();
 
       const { headers, rows } = parseCsvFile(args.filePath);
 

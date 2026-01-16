@@ -1,5 +1,5 @@
-import { readFileSync, statSync, existsSync } from "fs";
-import { resolve, normalize } from "path";
+import { readFileSync, statSync, existsSync, realpathSync } from "fs";
+import { resolve, normalize, sep } from "path";
 import { parse } from "csv-parse/sync";
 
 // Configuration constants
@@ -21,19 +21,89 @@ export interface CsvData {
 // Email validation (RFC 5322 simplified)
 export const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
 
+// Rate limiting class to prevent abuse
+export class RateLimiter {
+  private calls: number = 0;
+  private resetTime: number;
+
+  constructor(private windowMs: number = CONFIG.RATE_LIMIT_WINDOW_MS) {
+    this.resetTime = Date.now() + windowMs;
+  }
+
+  checkLimit(limit: number = CONFIG.RATE_LIMIT_MAX_CALLS): void {
+    const now = Date.now();
+
+    // Reset counter if window has passed
+    if (now > this.resetTime) {
+      this.calls = 0;
+      this.resetTime = now + this.windowMs;
+    }
+
+    this.calls++;
+
+    if (this.calls > limit) {
+      const resetIn = Math.ceil((this.resetTime - now) / 1000);
+      throw new Error(
+        `Rate limit exceeded. Maximum ${limit} tool calls per minute. Reset in ${resetIn} seconds.`
+      );
+    }
+  }
+
+  getStatus(): { calls: number; limit: number; resetsIn: number } {
+    const now = Date.now();
+    return {
+      calls: this.calls,
+      limit: CONFIG.RATE_LIMIT_MAX_CALLS,
+      resetsIn: Math.max(0, Math.ceil((this.resetTime - now) / 1000)),
+    };
+  }
+
+  // For testing: reset internal state
+  reset(): void {
+    this.calls = 0;
+    this.resetTime = Date.now() + this.windowMs;
+  }
+}
+
 // Security: Validate file path to prevent path traversal
 export function validateFilePath(filePath: string): string {
   const workingDir = process.cwd();
   const resolvedPath = resolve(normalize(filePath));
 
-  // Ensure path is within working directory
-  if (!resolvedPath.startsWith(workingDir)) {
+  // Ensure path is within working directory (with proper boundary check)
+  // Using workingDir + sep prevents bypass via paths like /app-malicious/file.csv
+  // when working dir is /app
+  const isWithinWorkingDir =
+    resolvedPath === workingDir ||
+    resolvedPath.startsWith(workingDir + sep);
+
+  if (!isWithinWorkingDir) {
     throw new Error("Access denied: File path must be within the current working directory");
   }
 
   // Only allow .csv files
   if (!resolvedPath.toLowerCase().endsWith('.csv')) {
     throw new Error("Invalid file type: Only CSV files are allowed");
+  }
+
+  // Security: Resolve symlinks and re-validate to prevent symlink attacks
+  // A symlink at ./data.csv could point to /etc/passwd.csv
+  if (existsSync(resolvedPath)) {
+    const realPath = realpathSync(resolvedPath);
+    const realPathWithinWorkingDir =
+      realPath === workingDir ||
+      realPath.startsWith(workingDir + sep);
+
+    if (!realPathWithinWorkingDir) {
+      throw new Error("Access denied: Symlinks to files outside working directory are not allowed");
+    }
+
+    // Re-validate extension after symlink resolution
+    if (!realPath.toLowerCase().endsWith('.csv')) {
+      throw new Error("Invalid file type: Symlink target must be a CSV file");
+    }
+
+    return realPath;
   }
 
   return resolvedPath;

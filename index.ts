@@ -15,28 +15,6 @@ interface ToolResponse {
   isError?: boolean;
 }
 
-// Structured logging interface
-interface AuditLog {
-  timestamp: string;
-  level: 'info' | 'warn' | 'error';
-  action: string;
-  filePath?: string;
-  success: boolean;
-  error?: string;
-  details?: Record<string, unknown>;
-}
-
-// Structured logging helper
-function logAudit(log: Omit<AuditLog, 'timestamp'>): void {
-  const auditEntry: AuditLog = {
-    ...log,
-    timestamp: new Date().toISOString(),
-  };
-
-  // Log to stderr as JSON for monitoring/parsing
-  console.error(JSON.stringify(auditEntry));
-}
-
 // Global rate limiter instance
 const rateLimiter = new RateLimiter();
 
@@ -46,14 +24,7 @@ function createErrorResponse(error: unknown, action: string, filePath?: string):
     ? error.message
     : "An unknown error occurred";
 
-  // Structured logging for errors
-  logAudit({
-    level: 'error',
-    action,
-    filePath,
-    success: false,
-    error: message,
-  });
+  console.error(`[${action}] Error: ${message}${filePath ? ` (file: ${filePath})` : ''}`);
 
   return {
     content: [{
@@ -64,15 +35,9 @@ function createErrorResponse(error: unknown, action: string, filePath?: string):
   };
 }
 
-// Zod schema with validation refinements
 const filePathSchema = z.string()
   .min(1, "File path cannot be empty")
-  .max(1000, "File path too long")
-  .refine(
-    (path) => !path.includes('..'),
-    "Path traversal (..) not allowed"
-  )
-  .describe("Path to the CSV file (must be .csv in current directory)");
+  .max(1000, "File path too long");
 
 // Tool 1: Parse CSV file
 const parseCsv = tool(
@@ -104,15 +69,6 @@ Security: Only CSV files in the current working directory are allowed.`,
         rowCount: rows.length,
         sample: rows.slice(0, CONFIG.SAMPLE_ROW_COUNT),
       };
-
-      // Audit log for successful parse
-      logAudit({
-        level: 'info',
-        action: 'parse_csv',
-        filePath: args.filePath,
-        success: true,
-        details: { rowCount: rows.length, headerCount: headers.length },
-      });
 
       return {
         content: [
@@ -184,15 +140,6 @@ Security: Only CSV files in the current working directory are allowed.`,
           uniqueValues: unique,
           sampleValues: nonEmpty.slice(0, CONFIG.SAMPLE_VALUE_COUNT),
         };
-      });
-
-      // Audit log for successful profiling
-      logAudit({
-        level: 'info',
-        action: 'profile_data',
-        filePath: args.filePath,
-        success: true,
-        details: { columnCount: headers.length, rowCount: rows.length },
       });
 
       return {

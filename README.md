@@ -140,7 +140,6 @@ The agent will:
 - **[Claude Agent SDK](https://platform.claude.com/docs/en/api/agent-sdk/overview)** - Autonomous agent framework
 - **[Bun](https://bun.sh)** - Fast JavaScript runtime
 - **[TypeScript](https://www.typescriptlang.org/)** - Type-safe development
-- **[Zod](https://zod.dev/)** - Schema validation
 - **[MCP](https://modelcontextprotocol.io/)** - Model Context Protocol for custom tools
 
 ## Project Structure

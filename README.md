@@ -2,14 +2,14 @@
 
 # CSV Cleaner Agent
 
-**AI-powered CSV cleaning and validation for seamless data imports**
+**AI-powered CSV cleaning and validation with Shopify import pipeline**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue)](https://www.typescriptlang.org/)
 [![Bun](https://img.shields.io/badge/Bun-1.2-black)](https://bun.sh)
 [![Claude Agent SDK](https://img.shields.io/badge/Claude%20Agent%20SDK-0.1.76-orange)](https://platform.claude.com/docs/en/api/agent-sdk/overview)
 
-[Features](#features) • [Quick Start](#quick-start) • [Demo](#demo) • [Architecture](#architecture)
+[Features](#features) • [Quick Start](#quick-start) • [Pipeline](#shopify-pipeline) • [Architecture](#architecture) • [Contributing](#contributing)
 
 </div>
 
@@ -17,49 +17,37 @@
 
 ## Overview
 
-Transform messy, inconsistent CSV files into clean, import-ready data with the power of AI. CSV Cleaner Agent analyzes your data, detects quality issues, and provides intelligent recommendations for cleaning—all powered by Claude's Agent SDK.
+Transform messy, inconsistent CSV files into clean, import-ready data with the power of AI. CSV Cleaner Agent analyzes your data, detects quality issues, and provides intelligent cleaning recommendations — all powered by Claude's Agent SDK.
+
+**New:** The **shopctl integration pipeline** chains AI-powered profiling with deterministic Shopify validation for a complete clean → validate → import workflow.
 
 Perfect for preparing data imports for **Shopify**, **QuickBooks**, **Business Central**, and more.
 
 ## Features
 
-**Smart CSV Parsing** - Automatic header detection and data structure analysis
-
-**Data Profiling** - Detect column types, null values, and anomalies
-
-**AI-Powered Insights** - Intelligent cleaning recommendations based on your target platform
-
-**Fast Processing** - Built on Bun for lightning-fast performance
-
-**Custom MCP Tools** - Extensible tool architecture for specialized cleaning operations
-
-### Upcoming Features
-
-- Column mapping and header normalization
-- Date format standardization
-- Phone number formatting
-- Deduplication
-- Platform-specific schema validation (Shopify, QuickBooks, Business Central)
-- Detailed cleaning reports
-- Web interface for file upload and preview
-- Saved cleaning presets
+| Feature | Description |
+|---------|-------------|
+| **Smart CSV Parsing** | Automatic header detection, encoding handling, structure analysis |
+| **Data Profiling** | Detect column types, null values, anomalies, and format inconsistencies |
+| **AI-Powered Cleaning** | Claude analyzes your data and applies intelligent fixes (dates, prices, SKUs, handles) |
+| **Shopify Pipeline** | End-to-end: profile → clean → validate → fix → diff → import |
+| **shopctl Bridge** | Shell integration with [shopctl](https://github.com/joeynyc/shopctl) for Shopify-specific validation |
+| **Security First** | Path traversal protection, symlink validation, rate limiting, input sanitization |
+| **Fast** | Built on Bun for lightning-fast processing |
 
 ## Quick Start
 
 ### Prerequisites
 
 - [Bun](https://bun.sh) 1.0+
-- [Claude Code CLI](https://code.claude.com/docs/en/setup)
 - [Anthropic API Key](https://console.anthropic.com/)
+- [shopctl](https://github.com/joeynyc/shopctl) (optional, for Shopify pipeline)
 
 ### Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/joeynyc/-CSVCleanerAgent.git
 cd CSVCleanerAgent
-
-# Install dependencies
 bun install
 
 # Set up your API key
@@ -67,126 +55,193 @@ cp .env.example .env
 # Edit .env and add your ANTHROPIC_API_KEY
 ```
 
-### Usage
+### Basic Usage
 
-**Interactive Mode:**
+**Interactive mode** — ask the agent to analyze any CSV:
+
 ```bash
 bun start
 ```
 
-**Analyze a Specific File:**
+**Analyze a specific file:**
+
 ```bash
-bun start "Analyze sample.csv and suggest cleaning steps"
+bun start "Profile the data in sample.csv and identify all issues"
 ```
 
-**Development Mode (Auto-reload):**
+**Development mode (auto-reload):**
+
 ```bash
 bun run dev
 ```
 
-**Type Checking:**
-```bash
-bun run typecheck
+The agent will parse the CSV, profile every column, detect issues (missing values, inconsistent formats, duplicates), and recommend cleaning strategies.
+
+---
+
+## Shopify Pipeline
+
+The pipeline chains AI cleaning with deterministic Shopify validation. Two tools working together — the AI handles the fuzzy stuff, shopctl handles the precise stuff.
+
+### How It Works
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  1. Profile  │ ──▶ │  2. AI Clean │ ──▶ │  3. Validate │ ──▶ │  4. Import   │
+│  Parse CSV,  │     │  Normalize   │     │  shopctl     │     │  Dry-run or  │
+│  detect types│     │  dates, SKUs,│     │  checks      │     │  confirm     │
+│  & anomalies │     │  prices, etc │     │  Shopify     │     │              │
+└──────────────┘     └──────────────┘     │  schema      │     └──────────────┘
+                                          └──────────────┘
 ```
 
-## Demo
-
-Try it with the included sample CSV that contains common data quality issues:
+### Pipeline Usage
 
 ```bash
-bun start "Profile the data in sample.csv and identify issues"
+# Basic: profile and clean, output to file
+bun run pipeline.ts products.csv --output cleaned.csv
+
+# Dry run: clean and validate against Shopify, but don't import
+bun run pipeline.ts products.csv --dry-run
+
+# Full send: clean, validate, and import to your store
+bun run pipeline.ts products.csv --auto-import
+
+# Use a specific Shopify store profile
+bun run pipeline.ts products.csv --profile production --dry-run
 ```
 
-The agent will:
-1. Parse the CSV structure
-2. Analyze each column for data types and quality
-3. Detect issues (missing values, format inconsistencies, duplicates)
-4. Recommend cleaning strategies
+### Pipeline Steps
 
-**Sample Data Issues:**
-- Missing names
-- Inconsistent date formats (YYYY-MM-DD vs MM/DD/YYYY vs DD-MM-YYYY)
-- Various phone number formats
-- Inconsistent SKU casing
-- Empty values in required fields
+| Step | What Happens |
+|------|-------------|
+| **Profile** | Parses CSV, detects column types (string, number, date, email), counts nulls, finds anomalies |
+| **AI Clean** | Claude analyzes the profile and applies smart fixes: date normalization, price formatting, SKU standardization, handle generation, boolean normalization |
+| **Validate** | `shopctl csv validate` checks against Shopify's exact CSV schema — catches errors the AI might miss |
+| **Fix** | If validation fails, `shopctl csv fix` auto-repairs Shopify-specific issues (encoding, missing fields, handle dedup) |
+| **Diff** | `shopctl csv diff` shows exactly what would change vs your live store |
+| **Import** | `shopctl csv import --dry-run` for rehearsal, or `--confirm` to push to Shopify |
+
+### Why Two Tools?
+
+| | CSV Cleaner Agent | shopctl |
+|---|---|---|
+| **Approach** | AI reasoning | Deterministic rules |
+| **Scope** | Any CSV, any platform | Shopify-specific |
+| **Strength** | Finds unexpected issues | Knows exact Shopify requirements |
+| **Output** | Cleaned CSV + recommendations | Validation errors + auto-fixes + API operations |
+| **Runtime** | Needs Claude API key | Just needs Shopify token |
+
+The AI catches the stuff rules can't anticipate. The rules catch the stuff the AI might overlook. Together, they cover everything.
+
+---
+
+## Standalone Agent
+
+Don't need Shopify? The core agent works with any CSV for any platform:
+
+```bash
+# Profile any CSV
+bun start "Analyze customers.csv and suggest cleaning steps for QuickBooks import"
+
+# Business Central prep
+bun start "Profile inventory.csv and recommend fixes for Business Central"
+```
+
+### MCP Tools
+
+The agent exposes two tools via the Model Context Protocol:
+
+- **`parse_csv`** — Parse a CSV file, return headers, row count, and sample rows
+- **`profile_data`** — Analyze every column: detect types, null counts, unique values, anomalies
+
+---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│           Claude Agent SDK                  │
-│  (Agent Loop + Context Management)          │
-└─────────────────┬───────────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────────┐
-│          MCP Server (csv-cleaner)           │
-│  ┌────────────────┐  ┌──────────────────┐  │
-│  │  parse_csv     │  │  profile_data    │  │
-│  │  - Headers     │  │  - Type detection│  │
-│  │  - Row count   │  │  - Null analysis │  │
-│  │  - Samples     │  │  - Anomalies     │  │
-│  └────────────────┘  └──────────────────┘  │
-└─────────────────────────────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────────┐
-│         Your CSV Files                      │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                  Pipeline (pipeline.ts)                  │
+│         CLI entry point + orchestration                  │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+          ┌────────────┴────────────┐
+          ▼                         ▼
+┌──────────────────────┐  ┌────────────────────────────┐
+│  Claude Agent SDK    │  │  shopctl Bridge            │
+│  (AI profiling +     │  │  (src/shopctl-bridge.ts)   │
+│   cleaning)          │  │                            │
+│                      │  │  validateCsv()             │
+│  MCP Server:         │  │  fixCsv()                  │
+│  ├─ parse_csv        │  │  diffCsv()                 │
+│  └─ profile_data     │  │  importCsv()               │
+└──────────────────────┘  └────────────────────────────┘
+          │                         │
+          ▼                         ▼
+┌──────────────────────┐  ┌────────────────────────────┐
+│  Your CSV Files      │  │  Shopify Admin API         │
+│                      │  │  (via shopctl CLI)         │
+└──────────────────────┘  └────────────────────────────┘
 ```
 
 ### Tech Stack
 
-- **[Claude Agent SDK](https://platform.claude.com/docs/en/api/agent-sdk/overview)** - Autonomous agent framework
-- **[Bun](https://bun.sh)** - Fast JavaScript runtime
-- **[TypeScript](https://www.typescriptlang.org/)** - Type-safe development
-- **[MCP](https://modelcontextprotocol.io/)** - Model Context Protocol for custom tools
+- **[Claude Agent SDK](https://platform.claude.com/docs/en/api/agent-sdk/overview)** — Autonomous agent framework
+- **[Bun](https://bun.sh)** — Fast JavaScript runtime
+- **[TypeScript](https://www.typescriptlang.org/)** — Type-safe development
+- **[MCP](https://modelcontextprotocol.io/)** — Model Context Protocol for custom tools
+- **[shopctl](https://github.com/joeynyc/shopctl)** — Shopify store management CLI
 
 ## Project Structure
 
 ```
 CSVCleanerAgent/
-├── index.ts              # Main agent implementation
-├── package.json          # Dependencies and scripts
-├── tsconfig.json         # TypeScript configuration
-├── .env.example          # Environment template
-├── sample.csv            # Example data with quality issues
-└── README.md             # You are here
+├── index.ts                # Standalone agent (AI profiling + recommendations)
+├── pipeline.ts             # Pipeline CLI entry point
+├── src/
+│   ├── utils.ts            # CSV parsing, validation, security utilities
+│   ├── pipeline.ts         # Pipeline orchestration (profile → clean → import)
+│   └── shopctl-bridge.ts   # Shell bridge to shopctl commands
+├── tests/
+│   ├── utils.test.ts       # Core utility tests
+│   └── pipeline.test.ts    # Pipeline + bridge tests
+├── sample.csv              # Example data with quality issues
+├── package.json
+├── tsconfig.json
+└── .env.example
+```
+
+## Testing
+
+```bash
+# Run all tests
+bun test
+
+# Watch mode
+bun test --watch
+
+# Type checking
+bun run typecheck
 ```
 
 ## Contributing
 
-Contributions are welcome! Here's how you can help:
+Contributions are welcome! Here's how:
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
+2. Create a feature branch (`git checkout -b feature/your-feature`)
+3. Commit your changes (`git commit -m 'Add your feature'`)
+4. Push to the branch (`git push origin feature/your-feature`)
 5. Open a Pull Request
-
-## Resources
-
-- [Claude Agent SDK Documentation](https://platform.claude.com/docs/en/api/agent-sdk/overview)
-- [TypeScript SDK Reference](https://platform.claude.com/docs/en/api/agent-sdk/typescript)
-- [Model Context Protocol](https://modelcontextprotocol.io/)
-- [Bun Documentation](https://bun.sh/docs)
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- Built with [Claude Agent SDK](https://platform.claude.com/docs/en/api/agent-sdk/overview) by Anthropic
-- Powered by [Bun](https://bun.sh) runtime
-- Inspired by the need for better data quality in business operations
+MIT — see [LICENSE](LICENSE) for details.
 
 ---
 
 <div align="center">
 
-**Star this repo if you find it useful!**
-
-Made with AI
+**Built with [Claude Agent SDK](https://platform.claude.com/docs/en/api/agent-sdk/overview) + [shopctl](https://github.com/joeynyc/shopctl)**
 
 </div>

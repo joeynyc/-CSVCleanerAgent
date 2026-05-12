@@ -1,15 +1,14 @@
 {
-  "name": "csvcleaneragent",
-  "version": "0.1.0",
-  "module": "index.ts",
+  "name": "csvclean",
+  "version": "0.2.0",
   "type": "module",
   "private": true,
+  "bin": {
+    "csvclean": "./src/cli.ts"
+  },
   "scripts": {
-    "start": "bun run index.ts",
-    "dev": "bun --watch index.ts",
-    "pipeline": "bun run pipeline.ts",
+    "start": "bun run src/cli.ts",
     "test": "bun test",
-    "test:watch": "bun test --watch",
     "typecheck": "bunx tsc --noEmit"
   },
   "devDependencies": {
@@ -19,7 +18,8 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.1.76",
-    "csv-parse": "^6.1.0"
+    "@anthropic-ai/sdk": "^0.32.1",
+    "csv-parse": "^6.1.0",
+    "csv-stringify": "^6.5.2"
   }
 }

@@ -1,0 +1,4 @@
+slug,name,sku,price,active,brand,description,qty
+Red T-Shirt,Red T-Shirt,abc-123,$19.99,yes,Acme,A red shirt,12
+Blue Tee,Blue Tee,xyz 456,"1,234.56",no,Acme,A blue tee,
+green hat,Green Hat,hat-99,€5,Y,Acme,Green wool hat,3

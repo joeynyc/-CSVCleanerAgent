@@ -1,5 +1,0 @@
-Name,Formula,Data
-Normal User,=SUM(1+1),Safe
-Attack,=cmd|'/c calc',Dangerous
-@Attack,@SUM(A1),Dangerous
-+Attack,+1+1,Dangerous

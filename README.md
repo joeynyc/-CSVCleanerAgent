@@ -1,73 +1,112 @@
-# CSV Cleaner Agent
+# csvclean
 
-AI-powered CSV cleaning with an optional Shopify import pipeline. Built on the [Claude Agent SDK](https://platform.claude.com/docs/en/api/agent-sdk/overview) and [Bun](https://bun.sh).
+Clean any CSV into Shopify-ready import data, then push it to the store. Streaming, deterministic where it can be, AI-assisted where it can't.
 
-The agent profiles any CSV, detects quality issues, and recommends fixes. The pipeline chains that AI cleaning with [shopctl](https://github.com/joeynyc/shopctl) for deterministic Shopify validation and import.
+- **Streaming.** Files are read row-by-row; memory is bounded regardless of file size.
+- **Deterministic cleaning.** Dates, prices, handles, booleans, SKUs are normalized by code, not by an LLM.
+- **AI for column mapping.** Headers that don't match the Shopify schema by name, alias, or fuzzy similarity are mapped by Claude with sample values for context.
+- **Direct Shopify Admin API.** Imports go through GraphQL `productSet` with cost-aware throttling. No shell-outs.
 
 ## Install
 
 ```bash
-git clone https://github.com/joeynyc/-CSVCleanerAgent.git
-cd CSVCleanerAgent
 bun install
-cp .env.example .env   # add ANTHROPIC_API_KEY
+cp .env.example .env
 ```
 
-Requires Bun 1.0+ and an Anthropic API key. `shopctl` is only needed for the Shopify pipeline.
+Required env:
 
-## Usage
+- `ANTHROPIC_API_KEY` — only when LLM-assisted column mapping is needed (use `--no-llm` to skip).
+- `SHOPIFY_STORE`, `SHOPIFY_ACCESS_TOKEN` — only for `import --confirm`.
 
-### Standalone agent
+## CLI
+
+```
+csvclean profile  <input>                          Column types and samples
+csvclean map      <input> [--no-llm]               Map headers → Shopify schema
+csvclean clean    <input> -o <out> [--no-llm]      Map + clean, write to <out>
+csvclean validate <input>                          Validate against Shopify schema
+csvclean import   <input> --dry-run | --confirm    Upload to Shopify Admin API
+csvclean run      <input> -o <out> [--dry-run|--confirm] [--no-llm]
+```
+
+`run` is the full pipeline: profile → map → clean → validate → (optional) import.
+
+### Example
 
 ```bash
-bun start                                          # interactive
-bun start "Profile sample.csv and list issues"     # one-shot prompt
-bun run dev                                        # auto-reload
+bun run src/cli.ts run samples/messy-products.csv -o cleaned.csv --dry-run
 ```
 
-Works with any CSV for any destination (Shopify, QuickBooks, Business Central, etc.). The agent exposes two MCP tools:
+A supplier CSV like:
 
-- `parse_csv` — headers, row count, sample rows
-- `profile_data` — per-column types, nulls, unique values, anomalies
-
-### Shopify pipeline
-
-```bash
-bun run pipeline.ts products.csv --output cleaned.csv
-bun run pipeline.ts products.csv --dry-run
-bun run pipeline.ts products.csv --auto-import
-bun run pipeline.ts products.csv --profile production --dry-run
+```csv
+slug,name,sku,price,active,brand
+Red T-Shirt,Red T-Shirt,abc-123,$19.99,yes,Acme
 ```
 
-Stages: **profile** (parse, detect types) → **clean** (Claude normalizes dates, prices, SKUs, handles, booleans) → **validate** (`shopctl csv validate`) → **fix** (`shopctl csv fix` on failure) → **diff** (`shopctl csv diff` vs live store) → **import** (`shopctl csv import`, dry-run or confirm).
+becomes:
 
-The AI handles fuzzy normalization; shopctl enforces Shopify's exact schema. Each catches what the other misses.
+```csv
+Handle,Title,Variant SKU,Variant Price,Published,Vendor
+red-t-shirt,Red T-Shirt,abc-123,19.99,TRUE,Acme
+```
 
-## Project structure
+## How it works
 
 ```
-index.ts                  Standalone agent entry
-pipeline.ts               Pipeline CLI
+input.csv
+   │
+   ▼
+profile   one streaming pass: detect column types + sample 200 values each
+   │
+   ▼
+map       input header → Shopify column
+            exact → normalized → alias → fuzzy → LLM (only if needed)
+   │
+   ▼
+clean     streaming transform; per-column deterministic cleaner
+   │      (date / price / handle / boolean / sku / string)
+   ▼
+output.csv
+   │
+   ▼
+validate  local schema check: required fields, enums, formats
+   │
+   ▼
+import    GraphQL productSet, grouped by Handle, throttle-aware
+```
+
+## Project layout
+
+```
 src/
-  utils.ts                CSV parsing, validation, security
-  pipeline.ts             Pipeline orchestration
-  shopctl-bridge.ts       Shell bridge to shopctl
+  cli.ts             CLI entry
+  pipeline.ts        Orchestrator
+  csv/
+    stream.ts        csv-parse / csv-stringify streaming wrappers
+    profile.ts       Sampling profiler
+    clean.ts         Deterministic cell cleaners
+  mapping/
+    map.ts           Heuristic + LLM column mapper
+  shopify/
+    schema.ts        Canonical Shopify product columns
+    validate.ts      Local schema validation
+    client.ts        Admin GraphQL client
+    import.ts        productSet upserts grouped by Handle
+  llm/
+    anthropic.ts     Minimal Claude wrapper (column mapping only)
 tests/
-  core.test.ts            CSV parsing & profiling
-  security.test.ts        Path traversal & symlinks
-  rate-limiter.test.ts    Rate limiting
-  pipeline.test.ts        Pipeline + bridge
-  fixtures/               Sample CSVs
+samples/
 ```
 
 ## Development
 
 ```bash
-bun test            # run tests
-bun test --watch
+bun test
 bun run typecheck
 ```
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT.
